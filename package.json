@@ -1,0 +1,19 @@
+{
+  "name": "jsnangcao",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "json-server db.json -m ./node_modules/json-server/auth",
+    "dev": "json-server db.json -m ./node_modules/json-server/auth",
+    "echo": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "json-server": "^0.17.4",
+    "json-server-auth": "^2.1.0"
+  },
+  "description": "",
+  "main": "Untitled-1.js",
+  "devDependencies": {},
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

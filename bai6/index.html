@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>XO - Phiên bản đồ họa & mạng</title>
+  <style>
+    :root{
+      --bg1:#0f172a; --bg2:#0f3d3e; --card:#0b1220; --accent:#00d4ff; --accent2:#8aff7a;
+      --glass: rgba(255,255,255,0.06);
+    }
+    *{box-sizing:border-box}
+    body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,var(--bg1),#071234);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans',sans-serif;color:#e6eef8}
+    .wrap{width:100%;max-width:1100px;padding:24px}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));border-radius:18px;padding:18px;backdrop-filter: blur(6px);box-shadow: 0 8px 30px rgba(2,6,23,0.7);display:flex;gap:18px}
+
+    /* left: game */
+    .left{flex:1;display:flex;flex-direction:column;align-items:center;padding:12px}
+    canvas#scene{width:100%;height:100%;max-width:540px;border-radius:14px;background:linear-gradient(180deg,#071426,#041022);box-shadow: inset 0 6px 20px rgba(0,0,0,0.6)}
+
+    /* right: controls */
+    .right{width:360px;padding:10px;display:flex;flex-direction:column;gap:12px}
+    .title{display:flex;align-items:center;justify-content:space-between}
+    h1{font-size:20px;margin:0}
+    .scoreboard{background:var(--glass);border-radius:12px;padding:12px;display:flex;gap:12px;align-items:center;justify-content:space-between}
+    .score-item{flex:1;text-align:center}
+    .score-num{font-size:28px;font-weight:700;color:var(--accent)}
+    .controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    button{background:linear-gradient(90deg,var(--accent),#7be8ff);border:0;padding:10px;border-radius:10px;font-weight:600;cursor:pointer;color:#041022}
+    .small{padding:8px;font-size:14px}
+    .muted{color:#9fb0c8;font-size:13px}
+
+    /* board overlay (for clicks) */
+    .overlay{position:absolute;pointer-events:none}
+
+    /* history & network */
+    .panel{background:rgba(255,255,255,0.03);padding:10px;border-radius:10px;max-height:240px;overflow:auto}
+    textarea{width:100%;height:80px;background:#041022;color:#dff6ff;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);resize:vertical}
+    .row{display:flex;gap:8px}
+    .hint{font-size:13px;color:#9fb0c8}
+
+    @media(max-width:900px){.card{flex-direction:column}.right{width:100%}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="left">
+        <div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;width:100%">
+          <canvas id="scene" width="540" height="540"></canvas>
+          <div id="status" class="muted">Lượt: <strong id="turn">X</strong></div>
+        </div>
+      </div>
+
+      <div class="right">
+        <div class="title"><h1>XO - Đồ họa & Mạng</h1><div class="muted">Phiên bản: nhẹ</div></div>
+
+        <div class="scoreboard">
+          <div class="score-item">
+            <div class="muted">X</div>
+            <div id="scoreX" class="score-num">0</div>
+          </div>
+          <div class="score-item">
+            <div class="muted">Hòa</div>
+            <div id="scoreD" class="score-num" style="color:var(--accent2)">0</div>
+          </div>
+          <div class="score-item">
+            <div class="muted">O</div>
+            <div id="scoreO" class="score-num">0</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button class="small" id="btnReset">Chơi lại ván</button>
+          <button class="small" id="btnNewGame">Reset điểm</button>
+          <button class="small" id="btnAI">Chơi với máy (dễ)</button>
+          <button class="small" id="btnAIMed">Chơi với máy (trung bình)</button>
+        </div>
+
+        <div class="panel">
+          <div class="muted">Mạng (không cần server): tạo Offer và copy-paste cho đối thủ. Hỗ trợ DataChannel WebRTC (manual signaling).</div>
+          <div style="height:8px"></div>
+          <div class="row"><button id="createOffer">Tạo Offer</button><button id="setAnswer">Đặt Answer</button></div>
+          <div style="height:8px"></div>
+          <textarea id="sdpLocal" placeholder="Offer / Answer của bạn..." ></textarea>
+          <textarea id="sdpRemote" placeholder="Dán Offer/Answer đối thủ vào đây và bấm 'Đặt Answer' nếu bạn là callee..." ></textarea>
+          <div style="height:8px"></div>
+          <div class="hint">Lưu ý: nếu muốn tự động, cần deploy 1 signaling server WebSocket. Hoặc copy/paste thủ công.</div>
+        </div>
+
+        <div class="panel" style="margin-top:8px">
+          <div class="muted">Lịch sử ván:</div>
+          <div id="history"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ---------- GAME STATE ---------- */
+    const canvas = document.getElementById('scene');
+    const ctx = canvas.getContext('2d');
+    const size = 3; // 3x3
+    let cellSize = canvas.width / 3;
+    let board = Array(9).fill(null);
+    let turn = 'X';
+    let gameOver = false;
+    let scores = {X:0,O:0,D:0};
+
+    // load scores
+    try{const raw = localStorage.getItem('xo_scores'); if(raw) scores = JSON.parse(raw);}catch(e){}
+    document.getElementById('scoreX').textContent = scores.X;
+    document.getElementById('scoreO').textContent = scores.O;
+    document.getElementById('scoreD').textContent = scores.D;
+
+    /* ---------- RENDERING & ANIMATIONS ---------- */
+    function drawBoard(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      // background gradient
+      const g = ctx.createLinearGradient(0,0,canvas.width,canvas.height);
+      g.addColorStop(0,'#05202e'); g.addColorStop(1,'#001219');
+      ctx.fillStyle = g; ctx.fillRect(0,0,canvas.width,canvas.height);
+
+      // grid lines
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 6; ctx.lineCap='round';
+      for(let i=1;i<3;i++){
+        // vertical
+        ctx.beginPath(); ctx.moveTo(cellSize*i,20); ctx.lineTo(cellSize*i,canvas.height-20); ctx.stroke();
+        // horizontal
+        ctx.beginPath(); ctx.moveTo(20,cellSize*i); ctx.lineTo(canvas.width-20,cellSize*i); ctx.stroke();
+      }
+
+      // draw symbols
+      for(let i=0;i<9;i++){
+        const v = board[i];
+        const cx = (i%3)*cellSize + cellSize/2;
+        const cy = Math.floor(i/3)*cellSize + cellSize/2;
+        if(v==='X') drawX(cx,cy);
+        if(v==='O') drawO(cx,cy);
+      }
+    }
+
+    function drawX(x,y){
+      ctx.save(); ctx.translate(x,y);
+      ctx.strokeStyle = 'rgba(0,212,255,0.95)'; ctx.lineWidth=16; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(-60,-60); ctx.lineTo(60,60); ctx.moveTo(60,-60); ctx.lineTo(-60,60); ctx.stroke();
+      ctx.restore();
+    }
+    function drawO(x,y){
+      ctx.save(); ctx.translate(x,y);
+      ctx.strokeStyle = 'rgba(138,255,122,0.95)'; ctx.lineWidth=14;
+      ctx.beginPath(); ctx.arc(0,0,64,0,Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+
+    drawBoard();
+
+    /* ---------- INPUT ---------- */
+    canvas.addEventListener('click', (e)=>{
+      if(gameOver) return;
+      const r = canvas.getBoundingClientRect();
+      const x = e.clientX - r.left; const y = e.clientY - r.top;
+      const col = Math.floor(x / cellSize); const row = Math.floor(y / cellSize);
+      const idx = row*3 + col;
+      if(board[idx]) return;
+      makeMove(idx, turn);
+      // if playing online, send move
+      if(dc && dc.readyState==='open') sendData({type:'move', idx, player:turn});
+      if(aiMode) setTimeout(aiPlay, 350);
+    });
+
+    function makeMove(idx, player){
+      if(board[idx]||gameOver) return;
+      board[idx]=player; checkResult(); renderAll();
+      turn = (player==='X')? 'O':'X'; document.getElementById('turn').textContent=turn;
+    }
+
+    function renderAll(){ drawBoard(); saveHistory(); }
+
+    /* ---------- WIN LOGIC ---------- */
+    const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+    function checkResult(){
+      for(const p of wins){
+        const [a,b,c]=p; if(board[a]&&board[a]===board[b]&&board[a]===board[c]){ gameOver=true; highlightWin(p); announceWin(board[a]); return; }
+      }
+      if(!board.includes(null)) { gameOver=true; announceDraw(); }
+    }
+
+    function highlightWin(pattern){
+      // simple flashing effect
+      let t=0; const iv=setInterval(()=>{
+        t++;
+        for(let i=0;i<9;i++){ if(pattern.includes(i)){
+          const cx=(i%3)*cellSize+cellSize/2; const cy=Math.floor(i/3)*cellSize+cellSize/2;
+          ctx.save(); ctx.globalAlpha=0.12*t; ctx.fillStyle='white'; ctx.beginPath(); ctx.arc(cx,cy,70,0,Math.PI*2); ctx.fill(); ctx.restore();
+        }}
+        if(t>6){ clearInterval(iv); }
+      },80);
+    }
+
+    function announceWin(p){
+      scores[p]++;
+      persistScores();
+      updateScoreUI();
+      addHistory(`${p} thắng`);
+      document.getElementById('status').textContent = p + ' thắng!';
+    }
+    function announceDraw(){ scores.D++; persistScores(); updateScoreUI(); addHistory('Hòa'); document.getElementById('status').textContent='Hòa!'; }
+
+    function updateScoreUI(){ document.getElementById('scoreX').textContent=scores.X; document.getElementById('scoreO').textContent=scores.O; document.getElementById('scoreD').textContent=scores.D; }
+    function persistScores(){ localStorage.setItem('xo_scores', JSON.stringify(scores)); }
+
+    /* ---------- HISTORY ---------- */
+    function saveHistory(){ document.getElementById('history').innerHTML = board.map((v,i)=>v? `${i+1}:${v}`:'').filter(Boolean).join(' • '); }
+    function addHistory(txt){ const h = document.getElementById('history'); const el = document.createElement('div'); el.textContent = `${new Date().toLocaleTimeString()} - ${txt}`; h.prepend(el); }
+
+    /* ---------- CONTROLS ---------- */
+    document.getElementById('btnReset').addEventListener('click', ()=>{ board=Array(9).fill(null); gameOver=false; turn='X'; document.getElementById('turn').textContent='X'; renderAll(); });
+    document.getElementById('btnNewGame').addEventListener('click', ()=>{ if(confirm('Reset tất cả điểm?')){ scores={X:0,O:0,D:0}; persistScores(); updateScoreUI(); }});
+
+    // AI (very simple / medium)
+    let aiMode = false; let aiLevel='easy';
+    document.getElementById('btnAI').addEventListener('click', ()=>{ aiMode = true; aiLevel='easy'; board=Array(9).fill(null); gameOver=false; turn='X'; document.getElementById('turn').textContent='X'; renderAll(); });
+    document.getElementById('btnAIMed').addEventListener('click', ()=>{ aiMode = true; aiLevel='med'; board=Array(9).fill(null); gameOver=false; turn='X'; document.getElementById('turn').textContent='X'; renderAll(); });
+
+    function aiPlay(){ if(gameOver) return; // choose best or random
+      if(aiLevel==='easy'){
+        const empties = board.map((v,i)=>v?null:i).filter(v=>v!==null);
+        const idx = empties[Math.floor(Math.random()*empties.length)]; makeMove(idx, turn); if(dc && dc.readyState==='open') sendData({type:'move', idx, player:turn});
+      } else {
+        // med: try win/block
+        const me = turn; const them = turn==='X'?'O':'X';
+        // try winning
+        for(let i=0;i<9;i++) if(!board[i]){ board[i]=me; if(checkImmediateWin(me)){ board[i]=null; makeMove(i,me); return;} board[i]=null; }
+        // try block
+        for(let i=0;i<9;i++) if(!board[i]){ board[i]=them; if(checkImmediateWin(them)){ board[i]=null; makeMove(i,me); return;} board[i]=null; }
+        // else random
+        const empties = board.map((v,i)=>v?null:i).filter(v=>v!==null);
+        const idx = empties[Math.floor(Math.random()*empties.length)]; makeMove(idx, me);
+      }
+    }
+    function checkImmediateWin(p){ for(const ptn of wins){ const [a,b,c]=ptn; if((board[a]===p&&board[b]===p&&board[c]===p)) return true; } return false; }
+
+    /* ---------- ONLINE (WebRTC DataChannel - manual signaling) ---------- */
+    let pc=null, dc=null;
+    const sdpLocal = document.getElementById('sdpLocal');
+    const sdpRemote = document.getElementById('sdpRemote');
+    document.getElementById('createOffer').addEventListener('click', async ()=>{
+      pc = new RTCPeerConnection(); dc = pc.createDataChannel('xo'); setupDC();
+      pc.ondatachannel = (e)=>{ dc = e.channel; setupDC(); };
+      pc.onicecandidate = (e)=>{ if(e.candidate) return; sdpLocal.value = JSON.stringify(pc.localDescription); };
+      const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
+      // wait for ice candidates to finish
+      setTimeout(()=>{ if(pc.localDescription) sdpLocal.value = JSON.stringify(pc.localDescription); },800);
+    });
+
+    document.getElementById('setAnswer').addEventListener('click', async ()=>{
+      try{
+        const remote = JSON.parse(sdpRemote.value);
+        if(remote.type==='answer'){
+          await pc.setRemoteDescription(remote);
+        } else if(remote.type==='offer'){
+          // if we got an offer, create answer
+          pc = new RTCPeerConnection();
+          pc.ondatachannel = (e)=>{ dc = e.channel; setupDC(); };
+          pc.onicecandidate = (e)=>{ if(e.candidate) return; sdpLocal.value = JSON.stringify(pc.localDescription); };
+          await pc.setRemoteDescription(remote);
+          const answer = await pc.createAnswer(); await pc.setLocalDescription(answer);
+          setTimeout(()=>{ if(pc.localDescription) sdpLocal.value = JSON.stringify(pc.localDescription); },800);
+        }
+        addHistory('Kết nối mạng thiết lập');
+      }catch(e){ alert('Không parse SDP: '+e); }
+    });
+
+    function setupDC(){ if(!dc) return; dc.onopen = ()=>{ addHistory('DataChannel mở'); }; dc.onmessage = (ev)=>{ try{ const data = JSON.parse(ev.data); handleRemote(data); }catch(e){} };
+    }
+
+    function sendData(obj){ if(dc && dc.readyState==='open') dc.send(JSON.stringify(obj)); }
+
+    function handleRemote(data){ if(data.type==='move'){ if(!board[data.idx]){ makeMove(data.idx, data.player); } } if(data.type==='reset'){ board=Array(9).fill(null); gameOver=false; renderAll(); } }
+
+    /* ---------- UTIL ---------- */
+    function addHistory(msg){ const h=document.getElementById('history'); const el=document.createElement('div'); el.textContent=`${new Date().toLocaleTimeString()} - ${msg}`; h.prepend(el); }
+
+    // auto-render loop for small animations
+    setInterval(()=>{ renderAll(); },400);
+
+    // human-friendly resize
+    window.addEventListener('resize', ()=>{ const rect = canvas.getBoundingClientRect(); cellSize = canvas.width/3; drawBoard(); });
+
+    // keyboard: R reset
+    window.addEventListener('keydown', (e)=>{ if(e.key==='r'||e.key==='R') { document.getElementById('btnReset').click(); } });
+
+    // initial
+    drawBoard();
+  </script>
+</body>
+</html>
