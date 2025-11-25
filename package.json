@@ -1,19 +1,23 @@
 {
-  "name": "jsnangcao",
-  "version": "1.0.0",
+  "name": "asm1",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "scripts": {
-    "start": "json-server db.json -m ./node_modules/json-server/auth",
-    "dev": "json-server db.json -m ./node_modules/json-server/auth",
-    "echo": "echo \"Error: no test specified\" && exit 1"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "json-server": "^0.17.4",
-    "json-server-auth": "^2.1.0"
+    "boostrap": "^2.0.0",
+    "vue": "^3.5.22"
   },
-  "description": "",
-  "main": "Untitled-1.js",
-  "devDependencies": {},
-  "keywords": [],
-  "author": "",
-  "license": "ISC"
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "vite": "^7.1.11",
+    "vite-plugin-vue-devtools": "^8.0.3"
+  }
 }
